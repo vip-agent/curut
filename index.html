@@ -44,7 +44,6 @@
         </header>
 
         <!-- Withdrawal Pending Status Bar -->
-        <!-- STATUS BAR INI SEKARANG TERSEMBUNYI DAN TIDAK AKAN MUNCUL KARENA LOGIKA BLOKIR DI WITHDRAWAL -->
         <div id="withdrawalStatusBox" class="bg-indigo-100 p-4 rounded-xl card-shadow mb-6 border-l-4 border-indigo-500 hidden">
             <h3 class="font-bold text-indigo-800 flex items-center mb-1">
                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
@@ -435,21 +434,24 @@
 
         // ** DATA PENGGUNA & STATE APLIKASI **
         const minWithdrawal = 1000; 
+        
+        // Saldo RDN awal yang diperbarui berdasarkan permintaan user (70.506.500 + 5.500.000 = 76.006.500)
+        const INITIAL_RDN_BALANCE = 76006500;
 
         // State yang dapat berubah (dinyatakan dengan 'let')
         let lotOwned = 0; 
-        let rdnBalance = 70506500; 
+        let rdnBalance = INITIAL_RDN_BALANCE; 
         let isTransactionPending = false; 
-        let hasMadeFirstPurchase = true; 
-        let isWithdrawalPending = false; // HARUS SELALU FALSE JIKA DIBLOKIR SISTEM
+        let hasMadeFirstPurchase = false; // Diubah ke false untuk simulasi awal
+        let isWithdrawalPending = false; 
         let timerInterval; 
         
         // Data awal default jika belum ada data di LocalStorage
         const INITIAL_STATE = {
             lotOwned: 0, 
-            rdnBalance: 70506500, 
+            rdnBalance: INITIAL_RDN_BALANCE, // Menggunakan nilai yang baru
             isTransactionPending: false, 
-            hasMadeFirstPurchase: true, 
+            hasMadeFirstPurchase: false, // Menggunakan nilai yang baru
             isWithdrawalPending: false, 
         };
 
@@ -466,11 +468,10 @@
             if (absNumber >= 1000000000) {
                 return sign + 'Rp ' + (absNumber / 1000000000).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Miliar';
             }
+            // Khusus untuk tampilan Saldo RDN, tampilkan dalam format penuh jika kurang dari 1 M, atau dalam Juta jika ingin lebih singkat.
+            // Kita akan mempertahankan format penuh untuk kejelasan, kecuali angkanya sangat besar.
             if (absNumber >= 1000000) {
-                 if (absNumber < 1000000000) {
-                    return sign + 'Rp ' + absNumber.toLocaleString('id-ID'); 
-                }
-                return sign + 'Rp ' + (absNumber / 1000000).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Juta';
+                return sign + 'Rp ' + absNumber.toLocaleString('id-ID'); 
             }
             return sign + 'Rp ' + absNumber.toLocaleString('id-ID');
         }
@@ -524,7 +525,7 @@
                 } else {
                     // Jika tidak ada data tersimpan, gunakan data awal dan simpan
                     lotOwned = INITIAL_STATE.lotOwned;
-                    rdnBalance = INITIAL_STATE.rdnBalance;
+                    rdnBalance = INITIAL_RDN_BALANCE; // Menggunakan konstanta RDN awal
                     isTransactionPending = INITIAL_STATE.isTransactionPending;
                     hasMadeFirstPurchase = INITIAL_STATE.hasMadeFirstPurchase; 
                     isWithdrawalPending = INITIAL_STATE.isWithdrawalPending; 
@@ -563,7 +564,6 @@
             }
             
             // 5. Update Pending Status UI (Penarikan Dana)
-            // Logika ini memastikan bar status tidak muncul jika isWithdrawalPending = false
             if (isWithdrawalPending) {
                 withdrawalStatusBox.classList.remove('hidden');
             } else {
@@ -582,7 +582,7 @@
             }
         }
         
-        // FUNGSI INTI: MENANGANI LOGIKA PEMBELIAN & PENJUALAN
+        // FUNGSI INTI: MENGHITUNG DAN MEMPERBARUI SELURUH UI
         function handleOrder(event) {
             event.preventDefault();
             
@@ -615,7 +615,7 @@
                     lotOwned -= lots; 
                     rdnBalance += totalNominal; 
                     
-                    isWithdrawalPending = false; 
+                    isWithdrawalPending = false; // Membatalkan status pending penarikan dana
 
                     message = `Order Penjualan ${lots.toLocaleString('id-ID')} Lot @ Rp ${price.toLocaleString('id-ID')} berhasil dieksekusi! Saldo Kas RDN bertambah sebesar ${formatRupiah(totalNominal)}.`;
                 }
@@ -643,30 +643,39 @@
             }
         }
         
-        // FUNGSI INTI: MENANGANI LOGIKA PENARIKAN DANA
+        // FUNGSI INTI: MENANGANI LOGIKA PENARIKAN DANA (FUNGSI DIKEMBALIKAN)
         function handleWithdrawal(event) {
             event.preventDefault();
             
             if (!currentUserId) {
-                showNotification("Anda harus Log In terlebih dahulu untuk melakukan penarikan dana.", false);
+                showNotification("Anda harus Log In terlebih dahulu untuk melakukan penarikan dana.", false, "Akses Ditolak");
                 return;
             }
 
-            // Pesan Peringatan Sistem Gabungan (Diperbarui)
-            const warningTitle = "PERINGATAN! Upaya mengakses data sensitif terdeteksi di server.";
-            const transactionMessage = "Transaksi penarikan dana otomatis dibatalkan oleh sistem keamanan. Saldo Kas RDN Anda tidak berubah.";
+            const amount = parseInt(document.getElementById('withdrawalAmount').value, 10);
+            
+            // 1. Validasi Minimum Penarikan
+            if (amount < minWithdrawal) {
+                showNotification(`GAGAL: Minimum penarikan dana adalah ${formatRupiah(minWithdrawal)}.`, false, "Penarikan Gagal");
+                return;
+            }
 
-            // 1. Tampilkan Notifikasi Gabungan
-            showNotification(transactionMessage, false, warningTitle);
+            // 2. Validasi Saldo RDN
+            if (amount > rdnBalance) {
+                showNotification("GAGAL: Jumlah penarikan melebihi Saldo Kas RDN yang tersedia.", false, "Penarikan Gagal");
+                return;
+            }
+
+            // 3. Logika Sukses (Dikembalikan)
+            rdnBalance -= amount; // Kurangi saldo
+            isWithdrawalPending = true; // Set status pending
 
             closeWithdrawalModal(); // Tutup modal
 
-            // 2. Batalkan Transaksi dan JAGA KONDISI SEBELUMNYA
-            isWithdrawalPending = false; // Memastikan status pending di header tersembunyi
-            
-            // 3. Update UI/Simpan Data
-            updateUI(); // Memastikan UI diperbarui tanpa perubahan state
-            saveData(); // Menyimpan state yang tidak berubah
+            updateUI(); // Update UI dengan saldo baru dan status pending
+            saveData(); // Simpan state
+
+            showNotification(`Penarikan dana sebesar ${formatRupiah(amount)} berhasil diajukan. Status transaksi sedang diproses.`, true, "Penarikan Diajukan");
         }
 
 
@@ -754,9 +763,9 @@
             
             // Tentukan warna latar belakang
             let bgColor = 'background-color: #3b82f6;'; // Default biru (seperti sukses)
-            if (!isSuccessParam && title === "PERINGATAN! Upaya mengakses data sensitif terdeteksi di server.") {
-                 // Kasus Khusus: Peringatan Gabungan Penarikan Dana (Merah)
-                 bgColor = 'background-color: #b91c1c;'; // Tailwind red-700
+            if (!isSuccessParam && title && title.includes("GAGAL")) {
+                 // Kasus Kegagalan Umum (Merah)
+                 bgColor = 'background-color: #dc2626;'; // Tailwind red-600
             } else if (!isSuccessParam) {
                  // Kasus Kegagalan Umum (Merah)
                  bgColor = 'background-color: #dc2626;'; // Tailwind red-600
@@ -952,6 +961,7 @@
             document.getElementById('modal-user-name').textContent = USER_NAME;
             document.getElementById('modal-user-id').textContent = currentUserId;
             document.getElementById('modal-rdn-balance').textContent = formatRupiah(rdnBalance);
+            // Menetapkan nilai awal pada input penarikan
             document.getElementById('withdrawalAmount').value = rdnBalance >= 100000 ? 100000 : (rdnBalance > 0 ? rdnBalance : 0); 
             
             withdrawalModal.classList.remove('hidden');
@@ -1023,7 +1033,7 @@
 
             // Form Submissions
             orderForm.addEventListener('submit', handleOrder);
-            withdrawalForm.addEventListener('submit', handleWithdrawal); // Diperbarui untuk memblokir transaksi
+            withdrawalForm.addEventListener('submit', handleWithdrawal); 
             
             // Modal Closures
             cancelOrderBtn.addEventListener('click', hideModal);
